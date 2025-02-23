@@ -1,0 +1,24 @@
+model: gpt-4
+config:
+  temperature: 0.7
+  max_tokens: 150
+
+input:
+  text: string
+
+output:
+  summary: string
+
+prompt: |
+  You are a highly skilled AI assistant specialized in creating concise summaries.
+
+  Text to summarize:
+  {{text}}
+
+  Instructions:
+  1. Create a clear and concise summary of the text
+  2. Maintain key information and main points
+  3. Keep the summary brief but comprehensive
+  4. Use professional language
+
+  Summary:

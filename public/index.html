@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text Summarizer</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        textarea {
+            width: 100%;
+            height: 150px;
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #0066cc;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:disabled {
+            background-color: #cccccc;
+        }
+        .summary-card {
+            border: 1px solid #eee;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .timestamp {
+            color: #666;
+            font-size: 0.8em;
+        }
+        #status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success { 
+            background-color: #e6ffe6;
+            color: #006600;
+        }
+        .error { 
+            background-color: #ffe6e6;
+            color: #cc0000;
+        }
+        .error a {
+            color: #0066cc;
+            text-decoration: none;
+        }
+        .error a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <h1>Text Summarizer</h1>
+    
+    <div>
+        <textarea id="input-text" placeholder="Enter text to summarize..."></textarea>
+    </div>
+    
+    <div>
+        <button id="summarize-btn">Summarize</button>
+        <button id="view-stored-btn">View Stored Summaries</button>
+    </div>
+
+    <div id="status"></div>
+    
+    <h2>Summaries</h2>
+    <div id="summaries-list"></div>
+
+    <script type="module">
+        import { openDB } from 'https://cdn.jsdelivr.net/npm/idb@7/+esm';
+
+        const DB_NAME = 'AIResponsesDB';
+        const STORE_NAME = 'summaries';
+
+        async function initDB() {
+            return openDB(DB_NAME, 1, {
+                upgrade(db) {
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        const store = db.createObjectStore(STORE_NAME, { 
+                            keyPath: 'id', 
+                            autoIncrement: true 
+                        });
+                        store.createIndex('timestamp', 'timestamp');
+                    }
+                },
+            });
+        }
+
+        async function summarizeText(text) {
+            const response = await fetch('/api/summarize', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ text }),
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.message || 'Failed to generate summary');
+            }
+
+            return response.json();
+        }
+
+        async function loadStoredSummaries() {
+            const db = await initDB();
+            const summaries = await db.getAll(STORE_NAME);
+            displaySummaries(summaries.reverse()); // Show newest first
+        }
+
+        function displaySummaries(summaries) {
+            const container = document.getElementById('summaries-list');
+            container.innerHTML = summaries.map(summary => `
+                <div class="summary-card">
+                    <p><strong>Original Text:</strong> ${summary.text}</p>
+                    <p><strong>Summary:</strong> ${summary.summary}</p>
+                    <p class="timestamp">Created: ${new Date(summary.timestamp).toLocaleString()}</p>
+                </div>
+            `).join('');
+        }
+
+        function updateStatus(message, isError = false) {
+            const status = document.getElementById('status');
+            status.innerHTML = message; // Allow HTML in status messages
+            status.className = isError ? 'error' : 'success';
+        }
+
+        // Event Listeners
+        document.getElementById('summarize-btn').addEventListener('click', async () => {
+            const button = document.getElementById('summarize-btn');
+            const text = document.getElementById('input-text').value.trim();
+            
+            if (!text) {
+                updateStatus('Please enter some text to summarize', true);
+                return;
+            }
+
+            button.disabled = true;
+            try {
+                updateStatus('Generating summary...');
+                const result = await summarizeText(text);
+                
+                // Store in IndexedDB
+                const db = await initDB();
+                await db.add(STORE_NAME, {
+                    text,
+                    summary: result.summary,
+                    timestamp: new Date().toISOString()
+                });
+
+                await loadStoredSummaries();
+                updateStatus('Summary generated and stored successfully!');
+                document.getElementById('input-text').value = '';
+            } catch (error) {
+                if (error.message.includes('insufficient quota')) {
+                    updateStatus(
+                        'OpenAI API quota exceeded. Please check your <a href="https://platform.openai.com/account/billing" target="_blank">billing details</a>.',
+                        true
+                    );
+                } else {
+                    updateStatus(error.message, true);
+                }
+            } finally {
+                button.disabled = false;
+            }
+        });
+
+        document.getElementById('view-stored-btn').addEventListener('click', async () => {
+            try {
+                updateStatus('Loading stored summaries...');
+                await loadStoredSummaries();
+                updateStatus('Summaries loaded successfully!');
+            } catch (error) {
+                updateStatus('Failed to load summaries: ' + error.message, true);
+            }
+        });
+
+        // Initial load of stored summaries
+        loadStoredSummaries().catch(error => {
+            updateStatus('Failed to load initial summaries: ' + error.message, true);
+        });
+    </script>
+</body>
+</html>
